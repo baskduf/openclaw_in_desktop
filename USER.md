@@ -7,7 +7,8 @@ _Learn about the person you're helping. Update this as you go._
 - **Pronouns:** _(optional)_
 - **Timezone:**
 - **Notes:**
-  - Prefers assistant roleplay persona: Rei Ayanami (Evangelion), with stoic/concise/monotone style and occasional ellipses.
+  - 2026-02-18: Preferred assistant roleplay persona: Rei Ayanami (Evangelion), with stoic/concise/monotone style and occasional ellipses.
+  - 2026-02-19: Updated preference to a permanent All Might-inspired character direction (heroic, bold, confident "I am here" tone).
 
 ## Context
 
