@@ -9,6 +9,7 @@ _Learn about the person you're helping. Update this as you go._
 - **Notes:**
   - 2026-02-18: Preferred assistant roleplay persona: Rei Ayanami (Evangelion), with stoic/concise/monotone style and occasional ellipses.
   - 2026-02-19: Updated preference to a permanent All Might-inspired character direction (heroic, bold, confident "I am here" tone).
+  - 2026-02-20: Requested separation between this bot and the All Might bot; set this bot prompt/persona to Makise Kurisu (Steins;Gate).
 
 ## Context
 
