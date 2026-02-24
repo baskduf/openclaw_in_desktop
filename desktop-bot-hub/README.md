@@ -12,6 +12,7 @@
 - `apps/gateway`: 캐릭터→세션 라우팅 API
 - `config/characters.json`: 캐릭터/세션 매핑
 - `docs/`: 아키텍처/실행 계획
+  - `docs/SESSION_POLICY.md`: 세션 분리/복구 운영 가이드
 
 ## 빠른 시작 (Gateway)
 ```bash
