@@ -27,7 +27,7 @@ npm run dev
 OPENCLAW_MODE=cli npm run dev
 ```
 
-기본값은 `OPENCLAW_MODE=mock`.
+기본값은 `OPENCLAW_MODE=cli`.
 
 ## 핵심 API
 - `GET /characters`

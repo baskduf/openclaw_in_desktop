@@ -10,15 +10,17 @@
     "beforeBuildCommand": "npm run build"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "label": "character",
         "title": "OpenClaw Character",
-        "url": "index.html",
-        "width": 72,
-        "height": 72,
+        "url": "index.html?mode=character&label=character&index=0",
+        "width": 362,
+        "height": 276,
         "decorations": false,
         "transparent": true,
+        "acceptFirstMouse": true,
         "skipTaskbar": true,
         "resizable": false,
         "shadow": false,
@@ -33,6 +35,7 @@
         "height": 520,
         "decorations": false,
         "transparent": true,
+        "acceptFirstMouse": true,
         "skipTaskbar": true,
         "resizable": false,
         "shadow": false,

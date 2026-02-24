@@ -10,11 +10,12 @@
     },
     {
       "id": "dev",
-      "name": "Developer",
+      "name": "마키세 크리스",
       "emoji": "🛠️",
-      "sessionId": "17cdf273-d00c-428a-b499-fa4846deaa92",
+      "sessionId": "e442292c-8dfe-4f07-8969-c50eb8ccbfe2",
       "agentId": "main",
-      "description": "기술 설계/코드 리뷰/디버깅"
+      "description": "기술 설계/코드 리뷰/디버깅",
+      "imagePath": "character-images/dev.webp"
     }
   ]
 }

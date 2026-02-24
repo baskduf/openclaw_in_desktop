@@ -1,19 +1,82 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { core } from '@tauri-apps/api'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import './App.css'
 
-const API_BASE =
-  import.meta.env.VITE_GATEWAY_BASE_URL || 'https://claw-baskduf.duckdns.org/botapi'
-const STORAGE_KEY = 'openclaw-desktop-char-pos'
-const PANEL_SIZE = { width: 360, height: 520 }
-const CHARACTER_SIZE = 72
+function resolveApiBase(raw) {
+  const fallback = 'http://127.0.0.1:4310'
+  const value = String(raw || '').trim()
+  if (!value) return fallback
+
+  const withProtocol = /^https?:\/\//i.test(value) ? value : `http://${value}`
+  try {
+    return new URL(withProtocol).toString().replace(/\/$/, '')
+  } catch {
+    return fallback
+  }
+}
+
+const API_BASE = resolveApiBase(import.meta.env.VITE_GATEWAY_BASE_URL)
+const API_BASE_NORMALIZED = API_BASE.replace(/\/$/, '')
+const POSITION_KEY_PREFIX = 'openclaw-desktop-char-pos'
+const ACTIVE_CHARACTER_KEY = 'openclaw-desktop-active-character'
+const PREVIEW_KEY_PREFIX = 'openclaw-desktop-reply-preview'
+const CHARACTERS_VERSION_KEY = 'openclaw-desktop-characters-version'
+const CHARACTER_PATCH_KEY = 'openclaw-desktop-character-patch'
+const PREVIEW_DURATION_MS = 6000
+const PREVIEW_MAX_LENGTH = 72
+const DEFAULT_CHARACTER_SCALE = 1
+const MIN_CHARACTER_SCALE = 0.6
+const MAX_CHARACTER_SCALE = 3
+const BASE_EMOJI_SIZE = 86
+const BASE_EMOJI_FONT_SIZE = 34
+const BASE_IMAGE_MAX_WIDTH = 320
+const BASE_IMAGE_MAX_HEIGHT = 220
+const CHARACTER_WINDOW_PADDING_X = 42
+const CHARACTER_WINDOW_PADDING_Y = 56
+const CHARACTER_PREVIEW_HEADROOM = 88
+const CHARACTER_PREVIEW_SIDE_PADDING = 24
+const MIN_CHARACTER_WINDOW_SIZE = { width: 220, height: 180 }
+const DEFAULT_CHARACTER_WINDOW_SIZE = {
+  width: BASE_IMAGE_MAX_WIDTH + CHARACTER_WINDOW_PADDING_X,
+  height: BASE_IMAGE_MAX_HEIGHT + CHARACTER_WINDOW_PADDING_Y + CHARACTER_PREVIEW_HEADROOM,
+}
 const CHARACTER_WINDOW_LABEL = 'character'
 const BUBBLE_WINDOW_LABEL = 'bubble'
 
-function isBubbleMode() {
-  if (typeof window === 'undefined') return false
-  return new URLSearchParams(window.location.search).get('mode') === 'bubble'
+function getQueryParam(name) {
+  if (typeof window === 'undefined') return null
+  return new URLSearchParams(window.location.search).get(name)
 }
+
+function isBubbleMode() {
+  return getQueryParam('mode') === 'bubble'
+}
+
+function getWindowLabel() {
+  return getQueryParam('label') || CHARACTER_WINDOW_LABEL
+}
+
+function getWindowCharacterId() {
+  return getQueryParam('characterId')
+}
+
+function getWindowBubbleLabel() {
+  return getQueryParam('bubbleLabel') || BUBBLE_WINDOW_LABEL
+}
+
+function getWindowIndex() {
+  const raw = getQueryParam('index')
+  const parsed = Number(raw || '0')
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+const BUBBLE_MODE = isBubbleMode()
+const WINDOW_LABEL = getWindowLabel()
+const WINDOW_CHARACTER_ID = getWindowCharacterId()
+const WINDOW_BUBBLE_LABEL = getWindowBubbleLabel()
+const WINDOW_INDEX = getWindowIndex()
 
 function canUseTauri() {
   return (
@@ -22,10 +85,146 @@ function canUseTauri() {
   )
 }
 
-function loadStoredPosition() {
+function positionKey(label) {
+  return `${POSITION_KEY_PREFIX}:${label}`
+}
+
+function previewKey(characterId) {
+  return `${PREVIEW_KEY_PREFIX}:${characterId}`
+}
+
+function toPreviewText(text) {
+  const normalized = String(text || '').replace(/\s+/g, ' ').trim()
+  if (!normalized) return ''
+  if (normalized.length <= PREVIEW_MAX_LENGTH) return normalized
+  return `${normalized.slice(0, PREVIEW_MAX_LENGTH - 3)}...`
+}
+
+function buildCharacterImageUrl(character, fallbackVersion = Date.now()) {
+  if (!character?.id) return ''
+  const hasImage = Boolean(character.hasImage || character.imagePath)
+  if (!hasImage) return ''
+
+  const version = character.imageVersion ?? fallbackVersion
+  return `${API_BASE_NORMALIZED}/characters/${encodeURIComponent(character.id)}/image?v=${version}`
+}
+
+function apiUrl(pathname) {
+  const path = pathname.startsWith('/') ? pathname : `/${pathname}`
+  return `${API_BASE_NORMALIZED}${path}`
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(new Error('image_read_failed'))
+    reader.readAsDataURL(file)
+  })
+}
+
+function toFiniteNumber(value, fallback) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
+function normalizeCharacterScale(value) {
+  const parsed = toFiniteNumber(value, DEFAULT_CHARACTER_SCALE)
+  return Math.max(MIN_CHARACTER_SCALE, Math.min(MAX_CHARACTER_SCALE, parsed))
+}
+
+function getCharacterScale(character) {
+  return normalizeCharacterScale(character?.avatarScale)
+}
+
+function getCharacterWindowSize(character) {
+  const scale = getCharacterScale(character)
+  const hasImage = Boolean(character?.imageUrl || character?.hasImage || character?.imagePath)
+
+  if (hasImage) {
+    const imageWidth = BASE_IMAGE_MAX_WIDTH * scale
+    const imageHeight = BASE_IMAGE_MAX_HEIGHT * scale
+    const previewWidth = Math.max(160, imageWidth + 30)
+    return {
+      width: Math.max(
+        MIN_CHARACTER_WINDOW_SIZE.width,
+        Math.round(Math.max(imageWidth + CHARACTER_WINDOW_PADDING_X, previewWidth + CHARACTER_PREVIEW_SIDE_PADDING)),
+      ),
+      height: Math.max(
+        MIN_CHARACTER_WINDOW_SIZE.height,
+        Math.round(imageHeight + CHARACTER_WINDOW_PADDING_Y + CHARACTER_PREVIEW_HEADROOM),
+      ),
+    }
+  }
+
+  const launcherSize = BASE_EMOJI_SIZE * scale
+  const previewWidth = Math.max(160, launcherSize * 2.1)
+  return {
+    width: Math.max(
+      MIN_CHARACTER_WINDOW_SIZE.width,
+      Math.round(
+        Math.max(
+          launcherSize + CHARACTER_WINDOW_PADDING_X + 26,
+          previewWidth + CHARACTER_PREVIEW_SIDE_PADDING,
+        ),
+      ),
+    ),
+    height: Math.max(
+      MIN_CHARACTER_WINDOW_SIZE.height,
+      Math.round(launcherSize + CHARACTER_WINDOW_PADDING_Y + 26 + CHARACTER_PREVIEW_HEADROOM),
+    ),
+  }
+}
+
+function getLauncherStyle(character) {
+  const scale = getCharacterScale(character)
+  const hasImage = Boolean(character?.imageUrl)
+
+  if (hasImage) {
+    const maxWidth = Math.round(BASE_IMAGE_MAX_WIDTH * scale)
+    const maxHeight = Math.round(BASE_IMAGE_MAX_HEIGHT * scale)
+    return {
+      '--launcher-image-max-width': `${maxWidth}px`,
+      '--launcher-image-max-height': `${maxHeight}px`,
+      '--preview-max-width': `${Math.max(160, maxWidth + 30)}px`,
+      '--preview-anchor-height': `${maxHeight}px`,
+      '--preview-gap': '10px',
+    }
+  }
+
+  const launcherSize = Math.round(BASE_EMOJI_SIZE * scale)
+  const fontSize = Math.round(BASE_EMOJI_FONT_SIZE * scale)
+  return {
+    '--launcher-size': `${launcherSize}px`,
+    '--launcher-font-size': `${fontSize}px`,
+    '--preview-max-width': `${Math.max(160, Math.round(launcherSize * 2.1))}px`,
+    '--preview-anchor-height': `${launcherSize}px`,
+    '--preview-gap': '10px',
+  }
+}
+
+function getBubbleAnchorSize(character) {
+  const scale = getCharacterScale(character)
+  if (character?.imageUrl) {
+    return {
+      width: Math.max(24, Math.round(BASE_IMAGE_MAX_WIDTH * scale)),
+      height: Math.max(24, Math.round(BASE_IMAGE_MAX_HEIGHT * scale)),
+    }
+  }
+
+  const size = Math.max(24, Math.round(BASE_EMOJI_SIZE * scale))
+  return { width: size, height: size }
+}
+
+function loadStoredPosition(label, index, windowSize = DEFAULT_CHARACTER_WINDOW_SIZE) {
   if (typeof window === 'undefined') return { x: 260, y: 520 }
-  const fallback = { x: 260, y: 520 }
-  const stored = window.localStorage?.getItem(STORAGE_KEY)
+
+  const fallback = {
+    x: 260,
+    y: 520 + index * (windowSize.height + 12),
+  }
+
+  const stored = window.localStorage?.getItem(positionKey(label))
   if (!stored) return fallback
 
   try {
@@ -36,17 +235,18 @@ function loadStoredPosition() {
   } catch {
     // ignore invalid cache
   }
+
   return fallback
 }
 
-function clampPosition(pos) {
+function clampPosition(pos, windowSize = DEFAULT_CHARACTER_WINDOW_SIZE) {
   if (typeof window === 'undefined') return pos
 
   const margin = 12
   const screenWidth = window.screen?.availWidth || window.innerWidth || 640
   const screenHeight = window.screen?.availHeight || window.innerHeight || 480
-  const maxX = Math.max(0, screenWidth - CHARACTER_SIZE - margin)
-  const maxY = Math.max(0, screenHeight - CHARACTER_SIZE - margin)
+  const maxX = Math.max(0, screenWidth - windowSize.width - margin)
+  const maxY = Math.max(0, screenHeight - windowSize.height - margin)
 
   return {
     x: Math.max(margin, Math.min(pos.x, maxX)),
@@ -54,91 +254,72 @@ function clampPosition(pos) {
   }
 }
 
-function clampToScreen(x, y, width, height) {
-  const margin = 12
-  const screenWidth = window.screen?.availWidth || window.innerWidth || 640
-  const screenHeight = window.screen?.availHeight || window.innerHeight || 480
-  const maxX = Math.max(0, screenWidth - width - margin)
-  const maxY = Math.max(0, screenHeight - height - margin)
-  return {
-    x: Math.max(margin, Math.min(x, maxX)),
-    y: Math.max(margin, Math.min(y, maxY)),
-  }
+function loadStoredCharacterId() {
+  if (typeof window === 'undefined') return null
+  return window.localStorage?.getItem(ACTIVE_CHARACTER_KEY) || null
 }
 
-function resolvePanelPlacement(posX, posY) {
-  const offset = 12
-  const panelGap = 14
-  const spaceForTop = PANEL_SIZE.height + 24
-  const panelFitsLeft = posX > PANEL_SIZE.width + 30
-  const panelFitsTop = posY >= spaceForTop
+async function safeInvoke(name, payload) {
+  if (!canUseTauri()) return
 
-  return {
-    left: panelFitsLeft ? `${-(PANEL_SIZE.width + panelGap)}px` : `${CHARACTER_SIZE + panelGap}px`,
-    top: panelFitsTop ? `${-(PANEL_SIZE.height + offset)}px` : `${CHARACTER_SIZE + offset}px`,
+  try {
+    await core.invoke(name, payload)
+  } catch {
+    // ignore tauri command failures in non-ready states
   }
-}
-
-function resolveBubblePosition() {
-  const charX = window.screenX || 0
-  const charY = window.screenY || 0
-  const charW = window.outerWidth || CHARACTER_SIZE
-  const charH = window.outerHeight || CHARACTER_SIZE
-
-  const gap = 14
-  const fallbackX = charX + charW + gap
-  const toLeftX = charX - PANEL_SIZE.width - gap
-  const x = toLeftX >= 0 ? toLeftX : fallbackX
-
-  const y = charY + (charH - PANEL_SIZE.height) / 2
-  const clamped = clampToScreen(x, y, PANEL_SIZE.width, PANEL_SIZE.height)
-  return clamped
 }
 
 function ChatPanel({
   activeCharacter,
-  characters,
-  activeCharacterId,
-  setActiveCharacterId,
   messages,
   error,
   input,
   setInput,
   sendMessage,
   loading,
+  pendingReply,
+  onOpenSettings,
   onClose,
-  open,
   panelClass,
 }) {
+  const markdownComponents = {
+    a: ({ ...props }) => <a {...props} target="_blank" rel="noreferrer noopener" />,
+  }
+
   return (
     <div className={`chat-bubble-panel ${panelClass || ''}`}>
       <div className="panel-header">
         <strong>{activeCharacter?.name || 'Bot'}</strong>
-        <button className="ghost" onClick={onClose}>
-          ✕
-        </button>
-      </div>
-
-      <div className="character-dock">
-        {characters.map((c) => (
-          <button
-            key={c.id}
-            className={`character ${c.id === activeCharacterId ? 'active' : ''}`}
-            onClick={() => setActiveCharacterId(c.id)}
-            title={`${c.name} - ${c.description}`}
-          >
-            <span>{c.emoji}</span>
+        <div className="panel-header-actions">
+          {onOpenSettings && (
+            <button className="ghost" onClick={onOpenSettings} title="캐릭터 설정">
+              ⚙
+            </button>
+          )}
+          <button className="ghost" onClick={onClose}>
+            ✕
           </button>
-        ))}
+        </div>
       </div>
 
       <div className="messages">
         {messages.map((m, idx) => (
           <div key={`${m.ts || idx}-${idx}`} className={`msg ${m.role}`}>
-            <div className="msg-text">{m.text}</div>
+            <div className="msg-text markdown-body">
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                {String(m.text || '')}
+              </ReactMarkdown>
+            </div>
           </div>
         ))}
-        {messages.length === 0 && <div className="empty">대화가 없습니다.</div>}
+
+        {pendingReply && (
+          <div className="msg assistant pending">
+            <div className="msg-text">...</div>
+          </div>
+        )}
+
+        {messages.length === 0 && !pendingReply && <div className="empty">대화가 없습니다.</div>}
       </div>
 
       {error && <div className="error">{error}</div>}
@@ -158,97 +339,395 @@ function ChatPanel({
   )
 }
 
-async function safeInvoke(name, payload) {
-  if (!canUseTauri()) return
+function SettingsModal({
+  open,
+  onClose,
+  draft,
+  onChange,
+  onSave,
+  saving,
+  onUploadImage,
+  uploadingImage,
+  imageUrl,
+}) {
+  if (!open) return null
 
-  try {
-    await core.invoke(name, payload)
-  } catch {
-    // ignore tauri command failures in non-ready states
-  }
+  return (
+    <div className="settings-backdrop" onClick={onClose}>
+      <div className="settings-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="settings-header">
+          <strong>캐릭터 설정</strong>
+          <button className="ghost" onClick={onClose}>
+            ✕
+          </button>
+        </div>
+
+        <div className="settings-body">
+          <label className="settings-field">
+            <span>이름</span>
+            <input value={draft.name} onChange={(e) => onChange('name', e.target.value)} />
+          </label>
+
+          <label className="settings-field">
+            <span>설명</span>
+            <input
+              value={draft.description}
+              onChange={(e) => onChange('description', e.target.value)}
+            />
+          </label>
+
+          <label className="settings-field">
+            <span>이모지</span>
+            <input value={draft.emoji} onChange={(e) => onChange('emoji', e.target.value)} />
+          </label>
+
+          <label className="settings-field">
+            <span>세션 ID</span>
+            <input value={draft.sessionId} onChange={(e) => onChange('sessionId', e.target.value)} />
+          </label>
+
+          <label className="settings-field">
+            <span>에이전트 ID</span>
+            <input value={draft.agentId} onChange={(e) => onChange('agentId', e.target.value)} />
+          </label>
+
+          <label className="settings-field">
+            <span>캐릭터 크기 배율 (0.6 - 3.0)</span>
+            <input
+              type="number"
+              min={MIN_CHARACTER_SCALE}
+              max={MAX_CHARACTER_SCALE}
+              step="0.1"
+              value={draft.avatarScale}
+              onChange={(e) => onChange('avatarScale', e.target.value)}
+            />
+          </label>
+
+          <label className="settings-field">
+            <span>캐릭터 이미지</span>
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                if (file) {
+                  void onUploadImage(file)
+                }
+                e.target.value = ''
+              }}
+              disabled={uploadingImage}
+            />
+          </label>
+
+          {imageUrl && (
+            <div className="settings-image-preview-wrap">
+              <img className="settings-image-preview" src={imageUrl} alt="character" />
+            </div>
+          )}
+        </div>
+
+        <div className="settings-actions">
+          <button className="ghost" onClick={onClose}>
+            취소
+          </button>
+          <button onClick={onSave} disabled={saving || uploadingImage}>
+            {saving ? '저장 중...' : '저장'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function App() {
-  const isBubble = isBubbleMode()
+  const isBubble = BUBBLE_MODE
   const [characters, setCharacters] = useState([])
-  const [activeCharacterId, setActiveCharacterId] = useState(null)
+  const [activeCharacterId, setActiveCharacterId] = useState(
+    () => WINDOW_CHARACTER_ID || loadStoredCharacterId(),
+  )
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [pendingReply, setPendingReply] = useState(false)
   const [error, setError] = useState('')
-  const [open, setOpen] = useState(false)
-  const [position, setPosition] = useState(() => clampPosition(loadStoredPosition()))
-
-  const dragState = useRef({
-    isDragging: false,
-    pointerId: null,
-    offsetX: 0,
-    offsetY: 0,
-    startX: 0,
-    startY: 0,
-    moved: false,
+  const [previewText, setPreviewText] = useState('')
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsSaving, setSettingsSaving] = useState(false)
+  const [uploadingImage, setUploadingImage] = useState(false)
+  const [settingsDraft, setSettingsDraft] = useState({
+    name: '',
+    description: '',
+    emoji: '',
+    sessionId: '',
+    agentId: '',
+    avatarScale: String(DEFAULT_CHARACTER_SCALE),
   })
+  const [, setPosition] = useState(() =>
+    clampPosition(
+      loadStoredPosition(WINDOW_LABEL, WINDOW_INDEX, DEFAULT_CHARACTER_WINDOW_SIZE),
+      DEFAULT_CHARACTER_WINDOW_SIZE,
+    ),
+  )
+  const previewTimerRef = useRef(null)
+  const dragState = useRef({ active: false, moved: false, pointerId: null, startX: 0, startY: 0 })
 
   const activeCharacter = useMemo(
     () => characters.find((c) => c.id === activeCharacterId),
     [characters, activeCharacterId],
   )
+  const windowCharacter = useMemo(() => {
+    if (WINDOW_CHARACTER_ID) {
+      return characters.find((c) => c.id === WINDOW_CHARACTER_ID) || null
+    }
+    return activeCharacter || null
+  }, [characters, activeCharacter])
+  const currentWindowSize = useMemo(
+    () => getCharacterWindowSize(windowCharacter),
+    [windowCharacter],
+  )
+  const launcherStyle = useMemo(() => getLauncherStyle(activeCharacter), [activeCharacter])
 
   useEffect(() => {
-    loadCharacters()
+    void loadCharacters()
   }, [])
 
   useEffect(() => {
-    if (!isBubble) {
-      const clamped = clampPosition(loadStoredPosition())
-      setPosition(clamped)
-      void safeInvoke('move_window', { label: CHARACTER_WINDOW_LABEL, x: clamped.x, y: clamped.y })
+    const handleStorage = (event) => {
+      if (event.key !== CHARACTERS_VERSION_KEY || !event.newValue) return
+      void loadCharacters()
     }
-  }, [isBubble])
+    window.addEventListener('storage', handleStorage)
+    return () => {
+      window.removeEventListener('storage', handleStorage)
+    }
+  }, [])
 
   useEffect(() => {
-    const handleResize = () => {
-      if (!isBubble) {
-        setPosition((prev) => clampPosition(prev))
+    const applyPatchPayload = (raw) => {
+      if (!raw) return
+      try {
+        const payload = JSON.parse(raw)
+        applyCharacterUpdate(payload?.character || {}, {
+          forceHasImage: Boolean(payload?.forceHasImage),
+        })
+      } catch {
+        // ignore invalid payload
       }
     }
-    window.addEventListener('resize', handleResize)
+
+    const latest = window.localStorage?.getItem(CHARACTER_PATCH_KEY)
+    if (latest) {
+      applyPatchPayload(latest)
+    }
+
+    const handleStorage = (event) => {
+      if (event.key !== CHARACTER_PATCH_KEY || !event.newValue) return
+      applyPatchPayload(event.newValue)
+    }
+
+    window.addEventListener('storage', handleStorage)
     return () => {
-      window.removeEventListener('resize', handleResize)
+      window.removeEventListener('storage', handleStorage)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (isBubble) return
+
+    void safeInvoke('set_window_size', {
+      label: WINDOW_LABEL,
+      width: currentWindowSize.width,
+      height: currentWindowSize.height,
+    })
+    const clamped = clampPosition(
+      loadStoredPosition(WINDOW_LABEL, WINDOW_INDEX, currentWindowSize),
+      currentWindowSize,
+    )
+    setPosition(clamped)
+    window.localStorage?.setItem(positionKey(WINDOW_LABEL), JSON.stringify(clamped))
+    void safeInvoke('move_window', { label: WINDOW_LABEL, x: clamped.x, y: clamped.y })
+  }, [isBubble, currentWindowSize.height, currentWindowSize.width])
+
+  useEffect(() => {
+    if (!isBubble) return
+    if (WINDOW_CHARACTER_ID) return
+
+    const handleStorage = (event) => {
+      if (event.key !== ACTIVE_CHARACTER_KEY) return
+      if (!event.newValue) return
+      setActiveCharacterId((prev) => (prev === event.newValue ? prev : event.newValue))
+    }
+    window.addEventListener('storage', handleStorage)
+    return () => {
+      window.removeEventListener('storage', handleStorage)
     }
   }, [isBubble])
 
   useEffect(() => {
-    if (!isBubble) {
-      window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(position))
+    if (isBubble) return
+
+    const currentCharacterId = WINDOW_CHARACTER_ID || activeCharacterId
+    if (!currentCharacterId) return
+
+    const key = previewKey(currentCharacterId)
+
+    const showPreview = (text, ts) => {
+      const normalized = toPreviewText(text)
+      if (!normalized || typeof ts !== 'number') return
+
+      const age = Date.now() - ts
+      if (age >= PREVIEW_DURATION_MS) return
+
+      if (previewTimerRef.current) {
+        window.clearTimeout(previewTimerRef.current)
+      }
+
+      setPreviewText(normalized)
+      previewTimerRef.current = window.setTimeout(() => {
+        setPreviewText('')
+      }, PREVIEW_DURATION_MS - age)
     }
-  }, [position, isBubble])
+
+    const applyPayload = (raw) => {
+      try {
+        const payload = JSON.parse(raw)
+        showPreview(payload?.text, payload?.ts)
+      } catch {
+        // ignore invalid payload
+      }
+    }
+
+    const existing = window.localStorage?.getItem(key)
+    if (existing) {
+      applyPayload(existing)
+    }
+
+    const handleStorage = (event) => {
+      if (event.key !== key || !event.newValue) return
+      applyPayload(event.newValue)
+    }
+
+    window.addEventListener('storage', handleStorage)
+    return () => {
+      window.removeEventListener('storage', handleStorage)
+      if (previewTimerRef.current) {
+        window.clearTimeout(previewTimerRef.current)
+        previewTimerRef.current = null
+      }
+    }
+  }, [isBubble, activeCharacterId])
 
   useEffect(() => {
-    if (!activeCharacterId) return
-    loadHistory(activeCharacterId)
-  }, [activeCharacterId])
+    if (!isBubble || !activeCharacterId) return
+    void loadHistory(activeCharacterId)
+  }, [isBubble, activeCharacterId])
 
-  function loadCharacters() {
-    fetch(`${API_BASE}/characters`)
-      .then((res) => res.json())
-      .then((data) => {
-        setCharacters(data.characters || [])
-        if ((data.characters || []).length > 0) {
-          setActiveCharacterId((prev) => prev || data.characters[0].id)
-        }
+  useEffect(() => {
+    if (isBubble) return
+    if (WINDOW_LABEL !== CHARACTER_WINDOW_LABEL) return
+    if (WINDOW_CHARACTER_ID) return
+    if (!activeCharacterId) return
+    if (characters.length === 0) return
+
+    const ids = characters.map((c) => c.id)
+    void safeInvoke('sync_character_windows', {
+      characterIds: ids,
+      primaryCharacterId: activeCharacterId,
+    })
+  }, [isBubble, activeCharacterId, characters])
+
+  function notifyCharactersUpdated() {
+    window.localStorage?.setItem(CHARACTERS_VERSION_KEY, String(Date.now()))
+  }
+
+  function broadcastCharacterPatch(character, forceHasImage = false) {
+    window.localStorage?.setItem(
+      CHARACTER_PATCH_KEY,
+      JSON.stringify({
+        ts: Date.now(),
+        forceHasImage,
+        character,
+      }),
+    )
+  }
+
+  function applyCharacterUpdate(updatedCharacter, { forceHasImage = false } = {}) {
+    if (!updatedCharacter?.id) return
+    const stamp = Date.now()
+    const patched = {
+      ...updatedCharacter,
+      hasImage: forceHasImage ? true : updatedCharacter.hasImage,
+      imageVersion: updatedCharacter.imageVersion ?? stamp,
+    }
+
+    setCharacters((prev) =>
+      prev.map((item) =>
+        item.id === patched.id
+          ? {
+              ...item,
+              ...patched,
+              imageUrl: buildCharacterImageUrl(patched, stamp),
+            }
+          : item,
+      ),
+    )
+  }
+
+  function publishReplyPreview(characterId, reply) {
+    const text = toPreviewText(reply)
+    if (!characterId || !text) return
+
+    const payload = JSON.stringify({ text, ts: Date.now() })
+    window.localStorage?.setItem(previewKey(characterId), payload)
+  }
+
+  function hydrateCharacters(items) {
+    const stamp = Date.now()
+    return (items || []).map((character) => ({
+      ...character,
+      imageUrl: buildCharacterImageUrl(character, stamp),
+    }))
+  }
+
+  async function loadCharacters() {
+    setError('')
+    try {
+      const res = await fetch(apiUrl('/characters'))
+      const data = await res.json()
+      const nextCharacters = hydrateCharacters(data.characters || [])
+      setCharacters(nextCharacters)
+
+      if (nextCharacters.length === 0) return
+
+      const stored = loadStoredCharacterId()
+      const fallback = nextCharacters[0].id
+      const selectedFromWindow =
+        WINDOW_CHARACTER_ID && nextCharacters.some((c) => c.id === WINDOW_CHARACTER_ID)
+          ? WINDOW_CHARACTER_ID
+          : null
+
+      setActiveCharacterId((prev) => {
+        if (selectedFromWindow) return selectedFromWindow
+        if (nextCharacters.some((c) => c.id === prev)) return prev
+        if (nextCharacters.some((c) => c.id === stored)) return stored
+        return fallback
       })
-      .catch((e) => setError(String(e.message || e)))
+    } catch (e) {
+      setError(String(e.message || e))
+    }
   }
 
   async function loadHistory(characterId) {
     setError('')
     try {
-      const res = await fetch(`${API_BASE}/chat/history/${characterId}`)
+      const res = await fetch(apiUrl(`/chat/history/${encodeURIComponent(characterId)}`))
       const data = await res.json()
-      setMessages(data.items || [])
+      const items = data.items || []
+      setMessages(items)
+      return items
     } catch (e) {
       setError(String(e.message || e))
+      return []
     }
   }
 
@@ -256,93 +735,159 @@ function App() {
     const text = input.trim()
     if (!text || !activeCharacterId || loading) return
 
+    const userMessage = { role: 'user', text, ts: Date.now() }
+
+    setMessages((prev) => [...prev, userMessage])
+    setPendingReply(true)
     setLoading(true)
     setError('')
     setInput('')
 
     try {
-      const res = await fetch(`${API_BASE}/chat/send`, {
+      const res = await fetch(apiUrl('/chat/send'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ characterId: activeCharacterId, text }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data?.message || data?.error || 'send failed')
-      await loadHistory(activeCharacterId)
+
+      const reply = String(data?.reply || '').trim()
+      if (reply) {
+        setMessages((prev) => [...prev, { role: 'assistant', text: reply, ts: Date.now() }])
+        publishReplyPreview(activeCharacterId, reply)
+      } else {
+        const items = await loadHistory(activeCharacterId)
+        const latestAssistant = [...items].reverse().find((item) => item.role === 'assistant')
+        if (latestAssistant?.text) {
+          publishReplyPreview(activeCharacterId, latestAssistant.text)
+        }
+      }
     } catch (e) {
       setError(String(e.message || e))
     } finally {
+      setPendingReply(false)
       setLoading(false)
     }
   }
 
-  const openBubble = async () => {
-    if (isBubble) return
-    const next = resolveBubblePosition()
-    await safeInvoke('move_window', {
-      label: BUBBLE_WINDOW_LABEL,
-      x: next.x,
-      y: next.y,
+  function openSettings() {
+    if (!activeCharacter) return
+
+    setSettingsDraft({
+      name: activeCharacter.name || '',
+      description: activeCharacter.description || '',
+      emoji: activeCharacter.emoji || '',
+      sessionId: activeCharacter.sessionId || '',
+      agentId: activeCharacter.agentId || '',
+      avatarScale: String(getCharacterScale(activeCharacter)),
     })
-    await safeInvoke('set_window_visible', { label: BUBBLE_WINDOW_LABEL, visible: true })
-    setOpen(true)
+    setSettingsOpen(true)
+  }
+
+  function closeSettings() {
+    setSettingsOpen(false)
+  }
+
+  async function saveSettings() {
+    if (!activeCharacterId) return
+
+    setSettingsSaving(true)
+    setError('')
+
+    try {
+      const payload = {
+        ...settingsDraft,
+        avatarScale: normalizeCharacterScale(settingsDraft.avatarScale),
+      }
+      const res = await fetch(apiUrl(`/characters/${encodeURIComponent(activeCharacterId)}`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.message || data?.error || 'settings_update_failed')
+
+      applyCharacterUpdate(data?.character || {})
+      broadcastCharacterPatch(data?.character || {}, false)
+      notifyCharactersUpdated()
+      setSettingsOpen(false)
+    } catch (e) {
+      setError(String(e.message || e))
+    } finally {
+      setSettingsSaving(false)
+    }
+  }
+
+  async function uploadCharacterImage(file) {
+    if (!activeCharacterId || !file) return
+
+    setUploadingImage(true)
+    setError('')
+
+    try {
+      const imageDataUrl = await readFileAsDataUrl(file)
+      const res = await fetch(
+        apiUrl(`/characters/${encodeURIComponent(activeCharacterId)}/image`),
+        {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageDataUrl }),
+        },
+      )
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.message || data?.error || 'image_upload_failed')
+
+      applyCharacterUpdate(data?.character || {}, { forceHasImage: true })
+      broadcastCharacterPatch(data?.character || {}, true)
+      notifyCharactersUpdated()
+    } catch (e) {
+      setError(String(e.message || e))
+    } finally {
+      setUploadingImage(false)
+    }
+  }
+
+  const openBubble = async () => {
+    if (isBubble || !activeCharacterId) return
+    const anchorSize = getBubbleAnchorSize(activeCharacter)
+    window.localStorage?.setItem(ACTIVE_CHARACTER_KEY, activeCharacterId)
+    await safeInvoke('toggle_character_bubble', {
+      anchorLabel: WINDOW_LABEL,
+      characterId: activeCharacterId,
+      anchorWidth: anchorSize.width,
+      anchorHeight: anchorSize.height,
+    })
   }
 
   const closeBubble = async () => {
-    await safeInvoke('set_window_visible', { label: BUBBLE_WINDOW_LABEL, visible: false })
-    setOpen(false)
+    await safeInvoke('set_window_visible', { label: WINDOW_BUBBLE_LABEL, visible: false })
   }
 
-  const toggleBubble = async () => {
-    if (open) {
-      await closeBubble()
-      return
-    }
-    await openBubble()
-  }
-
-  const handlePointerDown = (e) => {
+  const handleLauncherPointerDown = (e) => {
     if (isBubble) return
     if (e.button !== 0) return
 
     e.preventDefault()
-    e.currentTarget.setPointerCapture(e.pointerId)
-
-    const windowX = window.screenX || 0
-    const windowY = window.screenY || 0
-
     dragState.current = {
-      isDragging: true,
-      pointerId: e.pointerId,
-      offsetX: e.screenX - windowX,
-      offsetY: e.screenY - windowY,
-      startX: e.screenX,
-      startY: e.screenY,
+      active: true,
       moved: false,
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
     }
 
     const handlePointerMove = (event) => {
-      if (!dragState.current.isDragging || event.pointerId !== dragState.current.pointerId) return
+      if (!dragState.current.active) return
+      if (event.pointerId !== dragState.current.pointerId) return
+      if (dragState.current.moved) return
 
-      const nextX = event.screenX - dragState.current.offsetX
-      const nextY = event.screenY - dragState.current.offsetY
-
-      const dx = event.screenX - dragState.current.startX
-      const dy = event.screenY - dragState.current.startY
-      if (!dragState.current.moved && Math.sqrt(dx * dx + dy * dy) > 6) {
+      const dx = event.clientX - dragState.current.startX
+      const dy = event.clientY - dragState.current.startY
+      if (Math.sqrt(dx * dx + dy * dy) > 6) {
         dragState.current.moved = true
+        void safeInvoke('start_window_drag', { label: WINDOW_LABEL })
       }
-
-      setPosition((prev) => {
-        const next = clampPosition({ x: nextX, y: nextY })
-        if (prev.x === next.x && prev.y === next.y) return prev
-        void safeInvoke('move_window', {
-          label: CHARACTER_WINDOW_LABEL,
-          x: next.x,
-          y: next.y,
-        })
-        return next
-      })
     }
 
     const handlePointerUp = async (event) => {
@@ -352,12 +897,19 @@ function App() {
       window.removeEventListener('pointerup', handlePointerUp)
       window.removeEventListener('pointercancel', handlePointerUp)
 
-      const { moved } = dragState.current
-      dragState.current.isDragging = false
+      const moved = dragState.current.moved
+      dragState.current.active = false
 
       if (!moved) {
-        await toggleBubble()
+        await openBubble()
+        return
       }
+
+      window.setTimeout(() => {
+        const next = clampPosition({ x: window.screenX || 0, y: window.screenY || 0 }, currentWindowSize)
+        setPosition(next)
+        window.localStorage?.setItem(positionKey(WINDOW_LABEL), JSON.stringify(next))
+      }, 40)
     }
 
     window.addEventListener('pointermove', handlePointerMove)
@@ -368,28 +920,50 @@ function App() {
   return (
     <div className={`desktop-overlay ${isBubble ? 'desktop-overlay-bubble' : ''}`}>
       {isBubble ? (
-        <ChatPanel
-          activeCharacter={activeCharacter}
-          characters={characters}
-          activeCharacterId={activeCharacterId}
-          setActiveCharacterId={setActiveCharacterId}
-          messages={messages}
-          error={error}
-          input={input}
-          setInput={setInput}
-          sendMessage={sendMessage}
-          loading={loading}
-          onClose={closeBubble}
-          open={open}
-          panelClass="bubble-mode"
-        />
+        <>
+          <ChatPanel
+            activeCharacter={activeCharacter}
+            messages={messages}
+            error={error}
+            input={input}
+            setInput={setInput}
+            sendMessage={sendMessage}
+            loading={loading}
+            pendingReply={pendingReply}
+            onOpenSettings={openSettings}
+            onClose={closeBubble}
+            panelClass="bubble-mode"
+          />
+          <SettingsModal
+            open={settingsOpen}
+            onClose={closeSettings}
+            draft={settingsDraft}
+            onChange={(field, value) => setSettingsDraft((prev) => ({ ...prev, [field]: value }))}
+            onSave={saveSettings}
+            saving={settingsSaving}
+            onUploadImage={uploadCharacterImage}
+            uploadingImage={uploadingImage}
+            imageUrl={activeCharacter?.imageUrl || ''}
+          />
+        </>
       ) : (
-        <div
-          className="character-wrap"
-          style={{ left: '0px', top: '0px' }}
-        >
-          <button className="launcher" onPointerDown={handlePointerDown} title="Open Bot Hub">
-            {activeCharacter?.emoji || '🤖'}
+        <div className="character-wrap" style={launcherStyle}>
+          {previewText && <div className="character-preview">{previewText}</div>}
+          <button
+            className={`launcher active ${activeCharacter?.imageUrl ? 'launcher-image-mode' : ''}`}
+            onPointerDown={handleLauncherPointerDown}
+            title={`${activeCharacter?.name || 'Bot'} - ${activeCharacter?.description || ''}`}
+          >
+            {activeCharacter?.imageUrl ? (
+              <img
+                className="launcher-image"
+                src={activeCharacter.imageUrl}
+                alt={activeCharacter.name || 'bot'}
+                draggable={false}
+              />
+            ) : (
+              activeCharacter?.emoji || '🤖'
+            )}
           </button>
         </div>
       )}
