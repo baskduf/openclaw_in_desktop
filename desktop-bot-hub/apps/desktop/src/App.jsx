@@ -11,6 +11,7 @@ function App() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [open, setOpen] = useState(false)
 
   const activeCharacter = useMemo(
     () => characters.find((c) => c.id === activeCharacterId),
@@ -68,49 +69,54 @@ function App() {
 
   return (
     <div className="desktop-overlay">
-      <div className="chat-bubble-panel">
-        <div className="panel-header">
-          <strong>{activeCharacter?.name || 'Bot'}</strong>
-          <span className="muted">{activeCharacter?.description || ''}</span>
+      {open && (
+        <div className="chat-bubble-panel">
+          <div className="panel-header">
+            <strong>{activeCharacter?.name || 'Bot'}</strong>
+            <button className="ghost" onClick={() => setOpen(false)}>닫기</button>
+          </div>
+
+          <div className="character-dock">
+            {characters.map((c) => (
+              <button
+                key={c.id}
+                className={`character ${c.id === activeCharacterId ? 'active' : ''}`}
+                onClick={() => setActiveCharacterId(c.id)}
+                title={`${c.name} - ${c.description}`}
+              >
+                <span>{c.emoji}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="messages">
+            {messages.map((m, idx) => (
+              <div key={`${m.ts || idx}-${idx}`} className={`msg ${m.role}`}>
+                <div className="msg-text">{m.text}</div>
+              </div>
+            ))}
+            {messages.length === 0 && <div className="empty">메시지를 시작해…</div>}
+          </div>
+
+          {error && <div className="error">{error}</div>}
+
+          <div className="input-row">
+            <input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
+              placeholder="메시지 입력…"
+            />
+            <button onClick={sendMessage} disabled={loading}>
+              {loading ? '...' : '전송'}
+            </button>
+          </div>
         </div>
+      )}
 
-        <div className="messages">
-          {messages.map((m, idx) => (
-            <div key={`${m.ts || idx}-${idx}`} className={`msg ${m.role}`}>
-              <div className="msg-role">{m.role === 'assistant' ? activeCharacter?.emoji || '🤖' : '나'}</div>
-              <div className="msg-text">{m.text}</div>
-            </div>
-          ))}
-          {messages.length === 0 && <div className="empty">메시지를 시작해…</div>}
-        </div>
-
-        {error && <div className="error">{error}</div>}
-
-        <div className="input-row">
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-            placeholder="메시지 입력…"
-          />
-          <button onClick={sendMessage} disabled={loading}>
-            {loading ? '...' : '전송'}
-          </button>
-        </div>
-      </div>
-
-      <div className="character-dock">
-        {characters.map((c) => (
-          <button
-            key={c.id}
-            className={`character ${c.id === activeCharacterId ? 'active' : ''}`}
-            onClick={() => setActiveCharacterId(c.id)}
-            title={`${c.name} - ${c.description}`}
-          >
-            <span>{c.emoji}</span>
-          </button>
-        ))}
-      </div>
+      <button className="launcher" onClick={() => setOpen((v) => !v)} title="Open Bot Hub">
+        {activeCharacter?.emoji || '🤖'}
+      </button>
     </div>
   )
 }
