@@ -13,12 +13,21 @@
 - `config/characters.json`: 캐릭터/세션 매핑
 - `docs/`: 아키텍처/실행 계획
 
-## 빠른 시작 (Gateway Mock)
+## 빠른 시작 (Gateway)
 ```bash
 cd apps/gateway
 npm install
 npm run dev
 ```
+
+### 실제 OpenClaw 세션 연동 (CLI 모드)
+1) `config/characters.json`의 `sessionId` 값을 실제 값으로 교체
+2) 실행
+```bash
+OPENCLAW_MODE=cli npm run dev
+```
+
+기본값은 `OPENCLAW_MODE=mock`.
 
 ## 핵심 API
 - `GET /characters`
