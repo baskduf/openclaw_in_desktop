@@ -1,4 +1,45 @@
-use tauri::{LogicalPosition, LogicalSize, Manager, Position, Size};
+use tauri::{
+  LogicalPosition, Manager, Position, WindowEvent,
+  tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
+};
+use tauri::menu::{Menu, MenuItem};
+
+#[tauri::command]
+fn move_window(app_handle: tauri::AppHandle, label: String, x: f64, y: f64) {
+  if let Some(window) = app_handle.get_webview_window(&label) {
+    let _ = window.set_position(Position::Logical(LogicalPosition { x, y }));
+  }
+}
+
+#[tauri::command]
+fn set_window_visible(app_handle: tauri::AppHandle, label: String, visible: bool) {
+  if let Some(window) = app_handle.get_webview_window(&label) {
+    if visible {
+      let _ = window.show();
+      let _ = window.set_focus();
+    } else {
+      let _ = window.hide();
+    }
+  }
+}
+
+fn hide_all_windows(app_handle: &tauri::AppHandle) {
+  for label in ["character", "bubble"] {
+    if let Some(window) = app_handle.get_webview_window(label) {
+      let _ = window.hide();
+    }
+  }
+}
+
+fn show_character_only(app_handle: &tauri::AppHandle) {
+  if let Some(character) = app_handle.get_webview_window("character") {
+    let _ = character.show();
+    let _ = character.set_focus();
+  }
+  if let Some(bubble) = app_handle.get_webview_window("bubble") {
+    let _ = bubble.hide();
+  }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -12,22 +53,88 @@ pub fn run() {
         )?;
       }
 
-      let window = app.get_webview_window("main").expect("main window not found");
-      let target_w = 420.0;
-      let target_h = 620.0;
+      if let Some(character) = app.get_webview_window("character") {
+        let _ = character.set_always_on_top(true);
+        let _ = character.set_decorations(false);
+      }
 
-      let _ = window.set_size(Size::Logical(LogicalSize::new(target_w, target_h)));
-      let _ = window.set_always_on_top(true);
+      if let Some(bubble) = app.get_webview_window("bubble") {
+        let _ = bubble.set_always_on_top(true);
+        let _ = bubble.set_decorations(false);
+        let _ = bubble.hide();
+      }
 
-      if let Some(monitor) = window.current_monitor()? {
-        let m_pos = monitor.position();
-        let m_size = monitor.size();
-        let x = m_pos.x as f64 + (m_size.width as f64 - target_w - 24.0);
-        let y = m_pos.y as f64 + (m_size.height as f64 - target_h - 56.0);
-        let _ = window.set_position(Position::Logical(LogicalPosition::new(x, y)));
+      let tray_menu = Menu::with_items(
+        app,
+        &[
+          &MenuItem::with_id(app, "open", "Open", true, None::<&str>)?,
+          &MenuItem::with_id(app, "hide", "Hide", true, None::<&str>)?,
+          &MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?,
+        ],
+      )?;
+
+      let mut tray_builder = TrayIconBuilder::new()
+        .tooltip("OpenClaw")
+        .show_menu_on_left_click(false)
+        .menu(&tray_menu)
+        .on_menu_event(|app, event| {
+          match event.id() {
+            id if id == "open" => {
+              show_character_only(&app);
+            }
+            id if id == "hide" => {
+              hide_all_windows(&app);
+            }
+            id if id == "quit" => {
+              app.exit(0);
+            }
+            _ => {}
+          }
+        })
+        .on_tray_icon_event(|tray, event| {
+          let is_left_click = matches!(
+            event,
+            TrayIconEvent::DoubleClick { .. }
+              | TrayIconEvent::Click {
+                button: MouseButton::Left,
+                ..
+              }
+          );
+
+          if !is_left_click {
+            return;
+          }
+
+          if let Some(character) = tray.app_handle().get_webview_window("character") {
+            if let Ok(visible) = character.is_visible() {
+              if visible {
+                hide_all_windows(&tray.app_handle());
+              } else {
+                show_character_only(&tray.app_handle());
+              }
+            }
+          }
+        });
+
+      if let Some(icon) = app.default_window_icon().cloned() {
+        tray_builder = tray_builder.icon(icon);
+      }
+
+      let _tray = tray_builder.build(app)?;
+
+      if let Some(character) = app.get_webview_window("character") {
+        let _ = character.show();
       }
 
       Ok(())
+    })
+    .invoke_handler(tauri::generate_handler![move_window, set_window_visible])
+    .on_window_event(|window, event| {
+      if let WindowEvent::CloseRequested { api, .. } = event {
+        api.prevent_close();
+        let app_handle = window.app_handle();
+        hide_all_windows(&app_handle);
+      }
     })
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

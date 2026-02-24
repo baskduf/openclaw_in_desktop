@@ -12,12 +12,33 @@
   "app": {
     "windows": [
       {
-        "title": "Desktop Bot Hub",
-        "width": 420,
-        "height": 620,
-        "resizable": true,
+        "label": "character",
+        "title": "OpenClaw Character",
+        "url": "index.html",
+        "width": 72,
+        "height": 72,
+        "decorations": false,
+        "transparent": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "shadow": false,
         "fullscreen": false,
         "alwaysOnTop": true
+      },
+      {
+        "label": "bubble",
+        "title": "OpenClaw Bubble",
+        "url": "index.html?mode=bubble",
+        "width": 360,
+        "height": 520,
+        "decorations": false,
+        "transparent": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "shadow": false,
+        "fullscreen": false,
+        "alwaysOnTop": true,
+        "visible": false
       }
     ],
     "security": {
