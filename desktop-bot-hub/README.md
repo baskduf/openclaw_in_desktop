@@ -48,6 +48,7 @@ OPENCLAW_MODE=cli npm run dev
 - [x] 실제 OpenClaw 세션 연동 어댑터 연결
 - [x] Desktop UI 구현
 - [x] Tauri 래핑 스캐폴딩
+- [x] HTTPS/WSS 배포 템플릿(Caddy) 추가
 
 ## Desktop 실행
 ```bash

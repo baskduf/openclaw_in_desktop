@@ -1,0 +1,9 @@
+# Replace claw.example.com with your real domain
+# DNS A record must point to this AWS server
+
+claw.example.com {
+  encode zstd gzip
+
+  # Forward everything to OpenClaw gateway bound on loopback
+  reverse_proxy 127.0.0.1:18789
+}
