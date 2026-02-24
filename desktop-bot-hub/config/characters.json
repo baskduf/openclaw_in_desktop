@@ -1,0 +1,18 @@
+{
+  "characters": [
+    {
+      "id": "planner",
+      "name": "Planner",
+      "emoji": "🧭",
+      "sessionKey": "session_planner",
+      "description": "기획/우선순위/PRD 작성"
+    },
+    {
+      "id": "dev",
+      "name": "Developer",
+      "emoji": "🛠️",
+      "sessionKey": "session_dev",
+      "description": "기술 설계/코드 리뷰/디버깅"
+    }
+  ]
+}
