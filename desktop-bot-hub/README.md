@@ -45,5 +45,19 @@ OPENCLAW_MODE=cli npm run dev
 ## 상태
 - [x] 아키텍처/스키마 정의
 - [x] Gateway 기본 라우팅 구현
-- [ ] 실제 OpenClaw 세션 연동 어댑터 연결
-- [ ] Desktop UI 구현
+- [x] 실제 OpenClaw 세션 연동 어댑터 연결
+- [x] Desktop UI 구현
+- [x] Tauri 래핑 스캐폴딩
+
+## Desktop 실행
+```bash
+cd apps/desktop
+npm install
+npm run dev
+```
+
+## Tauri 실행 (사전조건: Rust/cargo 설치)
+```bash
+cd apps/desktop
+npm run tauri:dev
+```
