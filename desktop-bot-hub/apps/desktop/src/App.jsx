@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import './App.css'
 
-const API_BASE = import.meta.env.VITE_GATEWAY_BASE_URL || 'http://127.0.0.1:4310'
+const API_BASE =
+  import.meta.env.VITE_GATEWAY_BASE_URL || 'https://44-211-90-59.sslip.io/claw'
 
 function App() {
   const [characters, setCharacters] = useState([])
