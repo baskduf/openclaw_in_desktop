@@ -8,7 +8,7 @@
 - 캐릭터별 히스토리 유지
 
 ## 구조
-- `apps/desktop`: 데스크탑 UI (Tauri + React 예정)
+- `apps/desktop`: 데스크탑 UI (React MVP, 이후 Tauri 래핑)
 - `apps/gateway`: 캐릭터→세션 라우팅 API
 - `config/characters.json`: 캐릭터/세션 매핑
 - `docs/`: 아키텍처/실행 계획
