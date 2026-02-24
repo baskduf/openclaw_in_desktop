@@ -4,7 +4,7 @@
       "id": "planner",
       "name": "Planner",
       "emoji": "🧭",
-      "sessionId": "e442292c-8dfe-4f07-8969-c50eb8ccbfe2",
+      "sessionId": "1c5731ad-8b6d-432a-b9e8-d6da9db088b9",
       "agentId": "main",
       "description": "기획/우선순위/PRD 작성"
     },
@@ -12,7 +12,7 @@
       "id": "dev",
       "name": "Developer",
       "emoji": "🛠️",
-      "sessionId": "18f7d198-a169-4d47-83e3-65dfecae9817",
+      "sessionId": "17cdf273-d00c-428a-b499-fa4846deaa92",
       "agentId": "main",
       "description": "기술 설계/코드 리뷰/디버깅"
     }

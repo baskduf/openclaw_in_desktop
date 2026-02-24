@@ -63,7 +63,12 @@ async function sendViaCli(character, text) {
     throw new Error(`invalid_openclaw_json: ${stdout || stderr || 'empty output'}`);
   }
 
-  const reply = parsed?.reply ?? parsed?.result?.reply ?? parsed?.result?.text;
+  const reply =
+    parsed?.reply ??
+    parsed?.result?.reply ??
+    parsed?.result?.text ??
+    parsed?.result?.payloads?.find?.((p) => typeof p?.text === 'string')?.text;
+
   if (!reply) {
     throw new Error(`no_reply_from_openclaw: ${stdout || stderr || 'unknown'}`);
   }
