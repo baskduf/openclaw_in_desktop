@@ -31,7 +31,11 @@ openclaw gateway restart
 ## 5) 데스크탑 앱 연결
 `apps/desktop/.env.production` 또는 실행 환경 변수:
 ```bash
+# 분리 도메인 사용 시
 VITE_GATEWAY_BASE_URL=https://claw.example.com
+
+# 단일 도메인 + 경로 분리 사용 시(현재 임시 운영)
+VITE_GATEWAY_BASE_URL=https://44-211-90-59.sslip.io/claw
 ```
 
 ## 6) 점검
