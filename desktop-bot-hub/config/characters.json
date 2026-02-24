@@ -6,7 +6,9 @@
       "emoji": "🧭",
       "sessionId": "f6c9f09c-0d56-427c-a07b-0c42d32a308a",
       "agentId": "main",
-      "description": "기획/우선순위/PRD 작성"
+      "description": "기획/우선순위/PRD 작성",
+      "imagePath": "character-images/planner.jpg",
+      "avatarScale": 0.8
     },
     {
       "id": "dev",
@@ -15,7 +17,8 @@
       "sessionId": "ab71c18f-f2f2-4c58-864f-c36c111164cd",
       "agentId": "main",
       "description": "기술 설계/코드 리뷰/디버깅",
-      "imagePath": "character-images/dev.webp"
+      "imagePath": "character-images/dev.webp",
+      "avatarScale": 1
     }
   ]
 }
